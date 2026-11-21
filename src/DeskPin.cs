@@ -210,6 +210,9 @@ namespace DeskPin
         public int vsTop { get; set; }
         public int vsWidth { get; set; }
         public int vsHeight { get; set; }
+        public string coordMode { get; set; }
+        public int primaryLeft { get; set; }
+        public int primaryTop { get; set; }
         public string screens { get; set; }
         public uint viewMode { get; set; }
         public int iconSize { get; set; }
@@ -554,7 +557,10 @@ namespace DeskPin
                         absent++;
                         continue;
                     }
-                    if (Math.Abs(cur.x - it.x) <= 2 && Math.Abs(cur.y - it.y) <= 2) ok++;
+                    bool scaledItem2;
+                    POINT want2 = MapToScreen(snap, it, out scaledItem2);
+                    int tol2 = SnapTolerance(snap);
+                    if (Math.Abs(cur.x - want2.X) <= tol2 && Math.Abs(cur.y - want2.Y) <= tol2) ok++;
                     else bad++;
                 }
 
@@ -623,9 +629,8 @@ namespace DeskPin
                 try
                 {
                     Marshal.WriteIntPtr(arrPidl, 0, child);
-                    POINT pt;
-                    pt.X = it.x;
-                    pt.Y = it.y;
+                    bool scaledIgnored;
+                    POINT pt = MapToScreen(snap, it, out scaledIgnored);
                     Marshal.StructureToPtr(pt, arrPt, false);
                     if (fv.SelectAndPositionItems(1, arrPidl, arrPt, 0) == 0) ok++;
                 }
@@ -768,22 +773,15 @@ namespace DeskPin
             int moved = 0;
             int absent = 0;
             int maxDelta = 0;
+            int tol = SnapTolerance(snap);
             List<string> movedNames = new List<string>();
 
             foreach (SnapItem it in snap.items)
             {
-                int tx;
-                int ty;
-                if (rescaled)
-                {
-                    tx = vs.Left + (int)Math.Round((it.x - snap.vsLeft) * sx);
-                    ty = vs.Top + (int)Math.Round((it.y - snap.vsTop) * sy);
-                }
-                else
-                {
-                    tx = it.x;
-                    ty = it.y;
-                }
+                bool scaledItem;
+                POINT want = MapToScreen(snap, it, out scaledItem);
+                int tx = want.X;
+                int ty = want.Y;
 
                 POINT cur;
                 if (!now.TryGetValue(it.name, out cur))
@@ -794,7 +792,7 @@ namespace DeskPin
 
                 int d = Math.Max(Math.Abs(cur.X - tx), Math.Abs(cur.Y - ty));
                 if (d > maxDelta) maxDelta = d;
-                if (d <= 2)
+                if (d <= tol)
                 {
                     ok++;
                 }
@@ -921,6 +919,14 @@ namespace DeskPin
             return map;
         }
 
+        // 图标会被吸附到当前"图标间距"网格上；跨 DPI / 插拔副屏时这个间距会变（100 -> 98），
+        // 所以判定容差按半个格距算，避免把"整齐到位"误报成没到位。
+        private static int SnapTolerance(Snapshot snap)
+        {
+            if (snap != null && snap.spacingY > 20) return snap.spacingY / 2;
+            return 40;
+        }
+
         private static int CmdLvmFix(string[] args)
         {
             if (args.Length < 2)
@@ -953,8 +959,13 @@ namespace DeskPin
             {
                 ProbeRec rec;
                 if (!live.TryGetValue(it.name, out rec)) { skipped++; continue; }
-                if (Math.Abs(rec.x - it.x) <= 2 && Math.Abs(rec.y - it.y) <= 2) continue;
-                LvmSetPos(lv, rec.idx, it.x, it.y);
+
+                bool scaledIgnored;
+                POINT want = MapToScreen(snap, it, out scaledIgnored);
+                int tol = SnapTolerance(snap);
+                if (Math.Abs(rec.x - want.X) <= tol && Math.Abs(rec.y - want.Y) <= tol) continue;
+
+                LvmSetPos(lv, rec.idx, want.X, want.Y);
                 wrote++;
                 Thread.Sleep(120);
             }
@@ -1020,9 +1031,8 @@ namespace DeskPin
                 try
                 {
                     Marshal.WriteIntPtr(arrPidl, 0, child);
-                    POINT pt;
-                    pt.X = it.x;
-                    pt.Y = it.y;
+                    bool scaledIgnored;
+                    POINT pt = MapToScreen(snap, it, out scaledIgnored);
                     Marshal.StructureToPtr(pt, arrPt, false);
                     int hr = fv.SelectAndPositionItems(1, arrPidl, arrPt, 0);
                     if (hr == 0) ok++; else fail++;
@@ -1294,6 +1304,7 @@ namespace DeskPin
             System.Drawing.Rectangle vs = SystemInformation.VirtualScreen;
             s.vsLeft = vs.Left;
             s.vsTop = vs.Top;
+            s.coordMode = "primary";
             s.vsWidth = vs.Width;
             s.vsHeight = vs.Height;
 
@@ -1302,6 +1313,8 @@ namespace DeskPin
             {
                 s.screenWidth = primary.Bounds.Width;
                 s.screenHeight = primary.Bounds.Height;
+                s.primaryLeft = primary.Bounds.Left - vs.Left;
+                s.primaryTop = primary.Bounds.Top - vs.Top;
             }
 
             StringBuilder sb = new StringBuilder();
@@ -1357,8 +1370,8 @@ namespace DeskPin
 
                     SnapItem it = new SnapItem();
                     it.name = parsing;
-                    it.x = pt.X;
-                    it.y = pt.Y;
+                    it.x = pt.X - s.primaryLeft;
+                    it.y = pt.Y - s.primaryTop;
                     s.items.Add(it);
                 }
                 finally
@@ -1457,23 +1470,11 @@ namespace DeskPin
                 fullPidls.Add(pidl);
                 parentUnks.Add(parentUnk);
 
-                int x;
-                int y;
-                if (res.rescaled)
-                {
-                    x = vs.Left + (int)Math.Round((it.x - snap.vsLeft) * sx);
-                    y = vs.Top + (int)Math.Round((it.y - snap.vsTop) * sy);
-                }
-                else
-                {
-                    x = it.x;
-                    y = it.y;
-                }
-
-                if (x < vs.Left) x = vs.Left;
-                if (y < vs.Top) y = vs.Top;
-                if (x > vs.Right - 8) x = vs.Right - 8;
-                if (y > vs.Bottom - 8) y = vs.Bottom - 8;
+                bool scaledItem;
+                POINT mapped = MapToScreen(snap, it, out scaledItem);
+                if (scaledItem) res.rescaled = true;
+                int x = mapped.X;
+                int y = mapped.Y;
 
                 pidls.Add(childPidl);
                 POINT p = new POINT();
@@ -2204,7 +2205,65 @@ namespace DeskPin
             Snapshot s = Json.Deserialize<Snapshot>(text);
             if (s == null) throw new InvalidDataException("快照文件内容无效：" + path);
             if (s.items == null) s.items = new List<SnapItem>();
+            PrepareSnapshot(s);
             return s;
+        }
+
+        // 旧快照存的是"虚拟屏绝对坐标"，这里统一换算成"主屏相对坐标"：
+        // 副屏插拔只改变主屏在虚拟屏里的偏移，相对坐标不受影响。
+        private static void PrepareSnapshot(Snapshot s)
+        {
+            if (s == null) return;
+            if (s.coordMode == "primary") return;
+
+            int pl = 0;
+            int pt = 0;
+            if (s.vsWidth > 0 && s.screenWidth > 0 && s.vsWidth > s.screenWidth)
+            {
+                pl = s.vsWidth - s.screenWidth;
+            }
+            if (s.vsTop < 0) pt = -s.vsTop;
+
+            foreach (SnapItem it in s.items)
+            {
+                it.x -= pl;
+                it.y -= pt;
+            }
+
+            s.primaryLeft = pl;
+            s.primaryTop = pt;
+            s.coordMode = "primary";
+        }
+
+        // 相对坐标 -> 当前虚拟屏里的绝对坐标（主屏尺寸变了才按比例缩放）
+        private static POINT MapToScreen(Snapshot snap, SnapItem it, out bool rescaled)
+        {
+            System.Drawing.Rectangle vs = SystemInformation.VirtualScreen;
+            Screen primary = Screen.PrimaryScreen;
+
+            int pl = primary != null ? primary.Bounds.Left - vs.Left : 0;
+            int pt = primary != null ? primary.Bounds.Top - vs.Top : 0;
+            int pw = primary != null ? primary.Bounds.Width : vs.Width;
+            int ph = primary != null ? primary.Bounds.Height : vs.Height;
+
+            double kx = 1.0;
+            double ky = 1.0;
+            if (snap.screenWidth > 0 && snap.screenWidth != pw) kx = (double)pw / (double)snap.screenWidth;
+            if (snap.screenHeight > 0 && snap.screenHeight != ph) ky = (double)ph / (double)snap.screenHeight;
+            rescaled = (Math.Abs(kx - 1.0) > 0.01 || Math.Abs(ky - 1.0) > 0.01);
+
+            int x = pl + (int)Math.Round(it.x * kx);
+            int y = pt + (int)Math.Round(it.y * ky);
+
+            if (x < vs.Left) x = vs.Left;
+            if (y < vs.Top) y = vs.Top;
+            if (x > vs.Right - 8) x = vs.Right - 8;
+            if (y > vs.Bottom - 8) y = vs.Bottom - 8;
+
+            POINT r;
+            r.X = x;
+            r.Y = y;
+            return r;
         }
 
         private static string PrettyJson(string json)

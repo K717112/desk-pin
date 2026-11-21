@@ -1,6 +1,6 @@
 # DeskPin — 桌面图标布局快照 / 一键还原
 
-Save and restore Windows desktop icon layouts with named profiles. Built for the case where a display-config change (DisplayPort standby, a remote-desktop virtual monitor, taskbar height change) makes Explorer re-arrange every icon.
+Save and restore Windows desktop icon layouts with named profiles. Snapshots are stored in **primary-monitor relative coordinates**, so plugging/unplugging a secondary display does not move your icons. Built for the case where a display-config change (DisplayPort standby, a remote-desktop virtual monitor, taskbar height change) makes Explorer re-arrange every icon.
 
 > 中文说明为主；代码是单文件 C#（.NET Framework 4.0），无第三方依赖。
 
@@ -87,7 +87,8 @@ build.cmd
 | 限制 | 说明 |
 |---|---|
 | 分辨率变了再还原 | 坐标按原值写回，若新分辨率更小，右侧/底部图标会被夹到可见范围内（位置会挤，不会消失） |
-| 副屏插拔 | 副屏存在时保存的快照，在副屏拔掉后还原，副屏那部分图标会被夹回主屏；反之亦然 |
+| 副屏插拔 | 快照按「**主屏相对坐标**」保存（v1.0.1 起）：副屏拔掉/接上后，主屏上的图标位置不变；原本摆在副屏上的图标，无副屏时会被夹回主屏，接回副屏后回到原位 |
+| 图标间距变化 | 跨 DPI 或插拔副屏会让 shell 的图标间距从 `100` 变 `98`。还原后按**当前间距**对齐（每个图标仍在自己那一行），`verify` 以半个格距为容差判定，不算失败 |
 | 自动排列图标 | 必须保持关闭（右键桌面 → 查看 → 取消「自动排列图标」），否则写完立刻被系统抹掉 |
 | 桌面图标数量变化 | 快照不记录"项的顺序"，靠名字匹配，删了再加同名文件也能对上 |
 
