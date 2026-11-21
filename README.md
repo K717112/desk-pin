@@ -23,7 +23,7 @@ DeskPin 的做法：**把你摆好的那套布局整体存快照，需要时一�
 
 ### 方式一：直接下载（Release）
 
-1. 下载最新的 `DeskPin-v1.0.0-win.zip`，解压到任意目录（例如 `D:\Tools\desk-layout`）；
+1. 到 **[Releases](https://github.com/K717112/desk-pin/releases/latest)** 下载 `DeskPin-v1.0.0-win.zip`，解压到任意目录（例如 `D:\Tools\desk-layout`）；
 2. 双击 `DeskPinUI.exe`（或 `DeskPin.exe` 走命令行）；
 3. 摆好桌面 → 点「保存当前布局」；桌面乱了 → 双击列表里的快照。
 
