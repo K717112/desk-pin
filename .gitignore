@@ -1,0 +1,10 @@
+layouts/
+release/
+bin/
+obj/
+*.user
+*.suo
+.vs/
+_dump*
+DeskPin.exe
+DeskPinUI.exe
