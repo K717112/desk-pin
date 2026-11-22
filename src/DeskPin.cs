@@ -472,19 +472,67 @@ namespace DeskPin
 
             Console.WriteLine("正在还原：" + snap.name + "（保存于 " + snap.savedAt + "）");
 
-            int okApi = 0;
+            int total = snap.items.Count;
+            int okLast = 0;
+            int absentLast = 0;
+            int badLast = total;
+
             try
             {
-                IFolderView fv = GetDesktopFolderView();
-                if (fv.GetAutoArrange() == 0)
+                // 桌面的图标不允许重叠：一轮里"先写进去的"会挡住"后来要写的"，
+                // 所以 restore 内部自己收敛，直到没有未到位的项（最多 5 轮）。
+                for (int pass = 1; pass <= 5; pass++)
                 {
-                    Console.Error.WriteLine("[注意] 桌面「自动排列图标」是开启的，位置会被系统立刻抹掉。");
-                    Console.Error.WriteLine("       右键桌面 → 查看 → 取消「自动排列图标」后重试。");
-                    return 4;
-                }
+                    IFolderView fv = GetDesktopFolderView();
+                    if (fv.GetAutoArrange() == 0)
+                    {
+                        Console.Error.WriteLine("[注意] 桌面「自动排列图标」是开启的，位置会被系统立刻抹掉。");
+                        Console.Error.WriteLine("       右键桌面 → 查看 → 取消「自动排列图标」后重试。");
+                        return 4;
+                    }
 
-                okApi = SetByApi(fv, snap);
-                Console.WriteLine("  第一步    ：shell API 设置 " + okApi + " 项");
+                    int okApi = SetByApi(fv, snap);
+                    try
+                    {
+                        Marshal.ReleaseComObject(fv);
+                    }
+                    catch
+                    {
+                    }
+
+                    Thread.Sleep(200);
+
+                    string outp = "";
+                    try
+                    {
+                        outp = RunChild("lvmfix \"" + name + "\"");
+                    }
+                    catch
+                    {
+                    }
+
+                    Thread.Sleep(200);
+
+                    int ok;
+                    int absent;
+                    int bad;
+                    CountConsistency(snap, out ok, out absent, out bad);
+                    okLast = ok;
+                    absentLast = absent;
+                    badLast = bad;
+
+                    string line = "  第 " + pass + " 轮：" + (pass == 1 ? ("API 设置 " + okApi + " 项，") : "");
+                    if (!string.IsNullOrWhiteSpace(outp)) line += outp.Trim() + "，";
+                    line += "一致 " + ok + " / " + total + "，未到位 " + bad;
+                    Console.WriteLine(line);
+
+                    if (bad == 0)
+                    {
+                        break;
+                    }
+
+                    Thread.Sleep(250 + pass * 150);
+                }
             }
             catch (Exception ex)
             {
@@ -498,20 +546,12 @@ namespace DeskPin
                 return 0;
             }
 
-            Thread.Sleep(250);
-
-            // 跨显示器（副屏 200% 缩放）的项 API 会换算失败，交给独立进程用 ListView 物理像素补齐
-            try
+            Console.WriteLine("  核对结果  ：一致 " + okLast + " / " + total +
+                              "，未到位 " + badLast + "，已不存在 " + absentLast);
+            if (badLast > 0)
             {
-                string outp = RunChild("lvmfix \"" + name + "\"");
-                if (!string.IsNullOrWhiteSpace(outp)) Console.WriteLine("  第二步    ：" + outp.Trim());
+                Console.WriteLine("  提示      ：再执行一次 restore " + snap.name + " 通常可把剩余项补齐");
             }
-            catch
-            {
-            }
-
-            Thread.Sleep(300);
-            ReportConsistency(snap);
             PrintRestoreNotes(snap);
             return 0;
         }
@@ -540,29 +580,39 @@ namespace DeskPin
             }
         }
 
+        private static void CountConsistency(Snapshot snap, out int ok, out int absent, out int bad)
+        {
+            ok = 0;
+            absent = 0;
+            bad = 0;
+
+            Dictionary<string, ProbeRec> now = ProbeInChildProcess();
+            int tol = SnapTolerance(snap);
+
+            foreach (SnapItem it in snap.items)
+            {
+                ProbeRec cur;
+                if (!now.TryGetValue(it.name, out cur))
+                {
+                    absent++;
+                    continue;
+                }
+
+                bool scaledIgnored;
+                POINT want = MapToScreen(snap, it, out scaledIgnored);
+                if (Math.Abs(cur.x - want.X) <= tol && Math.Abs(cur.y - want.Y) <= tol) ok++;
+                else bad++;
+            }
+        }
+
         private static void ReportConsistency(Snapshot snap)
         {
             try
             {
-                IFolderView fv = GetDesktopFolderView();
-                Dictionary<string, ProbeRec> now = ProbeInChildProcess();
-                int ok = 0;
-                int absent = 0;
-                int bad = 0;
-                foreach (SnapItem it in snap.items)
-                {
-                    ProbeRec cur;
-                    if (!now.TryGetValue(it.name, out cur))
-                    {
-                        absent++;
-                        continue;
-                    }
-                    bool scaledItem2;
-                    POINT want2 = MapToScreen(snap, it, out scaledItem2);
-                    int tol2 = SnapTolerance(snap);
-                    if (Math.Abs(cur.x - want2.X) <= tol2 && Math.Abs(cur.y - want2.Y) <= tol2) ok++;
-                    else bad++;
-                }
+                int ok;
+                int absent;
+                int bad;
+                CountConsistency(snap, out ok, out absent, out bad);
 
                 Console.WriteLine("  核对结果  ：一致 " + ok + " / " + snap.items.Count +
                                   "，未到位 " + bad + "，已不存在 " + absent);
