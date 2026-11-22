@@ -2255,10 +2255,15 @@ namespace DeskPin
             int x = pl + (int)Math.Round(it.x * kx);
             int y = pt + (int)Math.Round(it.y * ky);
 
-            if (x < vs.Left) x = vs.Left;
-            if (y < vs.Top) y = vs.Top;
-            if (x > vs.Right - 8) x = vs.Right - 8;
-            if (y > vs.Bottom - 8) y = vs.Bottom - 8;
+            // 注意：这里的 x/y 是"桌面视图坐标"（0 = 虚拟桌面左上，副屏在左时主屏从 vs.Width-主屏宽 开始），
+            // 而 SystemInformation.VirtualScreen 给的是"绝对屏幕坐标"（Left 可能是 -2360）。
+            // 夹取必须用视图自己的范围 [0, vs.Width-8]，不能用 vs.Left / vs.Right。
+            int maxX = vs.Width - 8;
+            int maxY = vs.Height - 8;
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
+            if (x > maxX) x = maxX;
+            if (y > maxY) y = maxY;
 
             POINT r;
             r.X = x;
